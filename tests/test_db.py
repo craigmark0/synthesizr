@@ -30,7 +30,7 @@ def test_text_chunk_model_instantiation():
     assert text_chunk.id == chunk_id
 
 
-def test_chunk_has_generated_id_by_default():
+def test_chunk_id_is_none_until_flush():
     chunk = Chunk(
         chunk_type=ChunkType.text,
         document_id=uuid.uuid4(),
@@ -39,5 +39,4 @@ def test_chunk_has_generated_id_by_default():
         embedding=[0.0] * 3072,
         user_metadata={},
     )
-    assert chunk.id is not None
-    assert isinstance(chunk.id, uuid.UUID)
+    assert chunk.id is None  # gen_random_uuid() runs in Postgres on INSERT

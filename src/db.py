@@ -1,9 +1,8 @@
 import enum
-import uuid
 from datetime import datetime, timezone
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, Text, create_engine, event
+from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, Text, create_engine, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Session, relationship
 
@@ -30,7 +29,7 @@ class Chunk(Base):
         "polymorphic_identity": None,
     }
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     chunk_type = Column(Enum(ChunkType, name="chunk_type"), nullable=False)
     document_id = Column(UUID(as_uuid=True), nullable=False, index=True)
     chunk_index = Column(Integer, nullable=False)
@@ -49,14 +48,6 @@ class Chunk(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
-
-
-# Column(default=...) fires at INSERT time, not at Python object construction.
-# This listener assigns the UUID immediately so chunk.id is never None after Chunk().
-@event.listens_for(Chunk, "init")
-def _chunk_set_default_id(target, args, kwargs):
-    if not kwargs.get("id"):
-        target.id = uuid.uuid4()
 
 
 class TextChunk(Base):
