@@ -27,5 +27,21 @@ services:
       postgres:
         condition: service_healthy
 
+  test:
+    build: .
+    command: pytest tests/ -v
+    env_file: .env
+    environment:
+      GOOGLE_API_KEY: test-key
+      DATABASE_URL: postgresql://synthesizr:synthesizr@postgres:5432/synthesizr
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles:
+      - test
+
 volumes:
   pgdata:
