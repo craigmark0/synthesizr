@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock
-from src.query import search_chunks
+from src.config import settings
+from src.query import search_chunks, synthesize
 
 
 def _make_row(content: str, source: str, doc_id: str, similarity: float) -> MagicMock:
@@ -78,3 +79,61 @@ def test_search_chunks_result_contains_expected_keys():
     )
 
     assert results[0].keys() == {"content", "source", "document_id", "similarity"}
+
+
+def test_synthesize_returns_llm_answer():
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value.text = "The answer is 42."
+
+    chunks = [{"content": "42 is the answer.", "source": "doc.txt", "document_id": "abc", "similarity": 0.9}]
+    result = synthesize(question="What is the answer?", chunks=chunks, client=mock_client)
+
+    assert result == "The answer is 42."
+
+
+def test_synthesize_includes_chunk_content_in_prompt():
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value.text = "Some answer."
+
+    chunks = [{"content": "Important fact.", "source": "doc.txt", "document_id": "abc", "similarity": 0.9}]
+    synthesize(question="What happened?", chunks=chunks, client=mock_client)
+
+    call_kwargs = mock_client.models.generate_content.call_args.kwargs
+    prompt = call_kwargs["contents"]
+    assert "Important fact." in prompt
+    assert "What happened?" in prompt
+
+
+def test_synthesize_includes_source_in_prompt():
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value.text = "Answer."
+
+    chunks = [{"content": "Fact here.", "source": "my-source.txt", "document_id": "abc", "similarity": 0.9}]
+    synthesize(question="Q?", chunks=chunks, client=mock_client)
+
+    call_kwargs = mock_client.models.generate_content.call_args.kwargs
+    prompt = call_kwargs["contents"]
+    assert "my-source.txt" in prompt
+
+
+def test_synthesize_empty_chunks_returns_no_context_message():
+    mock_client = MagicMock()
+    result = synthesize(question="What is X?", chunks=[], client=mock_client)
+    assert "No relevant context" in result
+    mock_client.models.generate_content.assert_not_called()
+
+
+def test_synthesize_calls_correct_model_with_system_instruction():
+    mock_client = MagicMock()
+    mock_client.models.generate_content.return_value.text = "Answer."
+
+    chunks = [{"content": "Fact.", "source": "doc.txt", "document_id": "abc", "similarity": 0.9}]
+    synthesize(question="Q?", chunks=chunks, client=mock_client)
+
+    call_kwargs = mock_client.models.generate_content.call_args.kwargs
+    assert call_kwargs["model"] == settings.llm_model
+    assert call_kwargs["config"].system_instruction == (
+        "You are a helpful assistant. Answer the user's question using only the context provided. "
+        "If the context does not contain enough information to answer, say so clearly. "
+        "Do not use knowledge outside of the provided context."
+    )

@@ -1,6 +1,7 @@
 from typing import Optional
 
 from google import genai
+from google.genai import types
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -58,3 +59,27 @@ def search_chunks(
         }
         for r in rows[:top_k]
     ]
+
+
+_SYSTEM_PROMPT = (
+    "You are a helpful assistant. Answer the user's question using only the context provided. "
+    "If the context does not contain enough information to answer, say so clearly. "
+    "Do not use knowledge outside of the provided context."
+)
+
+
+def synthesize(question: str, chunks: list[dict], client: genai.Client) -> str:
+    if not chunks:
+        return "No relevant context was found to answer this question."
+
+    context_sections = "\n\n---\n\n".join(
+        f"Source: {c['source']}\n{c['content']}" for c in chunks
+    )
+    prompt = f"Context:\n{context_sections}\n\nQuestion: {question}"
+
+    response = client.models.generate_content(
+        model=settings.llm_model,
+        config=types.GenerateContentConfig(system_instruction=_SYSTEM_PROMPT),
+        contents=prompt,
+    )
+    return response.text or "I was unable to generate a response."
