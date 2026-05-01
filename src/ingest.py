@@ -8,7 +8,11 @@ def chunk_text(
 ) -> list[str]:
     size = chunk_size if chunk_size is not None else settings.chunk_size
     ovlp = overlap if overlap is not None else settings.chunk_overlap
-    if not text:
+    if ovlp >= size:
+        raise ValueError(
+            f"overlap ({ovlp}) must be less than chunk_size ({size})"
+        )
+    if not text or not text.strip():
         return []
     chunks = []
     start = 0
