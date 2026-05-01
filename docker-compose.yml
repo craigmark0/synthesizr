@@ -23,6 +23,7 @@ services:
     env_file: .env
     volumes:
       - ./src:/app/src
+      - ./alembic:/app/alembic
     depends_on:
       postgres:
         condition: service_healthy
@@ -37,6 +38,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./tests:/app/tests
+      - ./alembic:/app/alembic
     depends_on:
       postgres:
         condition: service_healthy
