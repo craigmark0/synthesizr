@@ -1,4 +1,8 @@
-from src.ingest import chunk_text
+import pytest
+from unittest.mock import MagicMock
+
+from src.config import settings
+from src.ingest import chunk_text, embed_text
 
 
 def test_chunk_text_short_input_returns_single_chunk():
@@ -38,7 +42,6 @@ def test_chunk_text_exact_chunk_size_returns_single_chunk():
 
 
 def test_chunk_text_raises_when_overlap_not_less_than_chunk_size():
-    import pytest
     with pytest.raises(ValueError):
         chunk_text("some text", chunk_size=100, overlap=100)
 
@@ -55,11 +58,6 @@ def test_chunk_text_three_chunks():
     assert len(result[0]) == 1000
     assert len(result[1]) == 1000
     assert len(result[2]) == 1000
-
-
-from unittest.mock import MagicMock
-from src.config import settings
-from src.ingest import embed_text
 
 
 def test_embed_text_returns_vector_of_correct_length():
@@ -86,3 +84,11 @@ def test_embed_text_calls_gemini_with_correct_model():
         model=settings.embedding_model,
         contents="some text",
     )
+
+
+def test_embed_text_raises_when_gemini_returns_no_embeddings():
+    mock_client = MagicMock()
+    mock_client.models.embed_content.return_value.embeddings = []
+
+    with pytest.raises(ValueError, match="no embeddings"):
+        embed_text("hello", client=mock_client)

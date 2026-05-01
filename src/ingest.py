@@ -28,8 +28,13 @@ def chunk_text(
 
 
 def embed_text(text: str, client: genai.Client) -> list[float]:
-    result = client.models.embed_content(
-        model=settings.embedding_model,
-        contents=text,
-    )
+    try:
+        result = client.models.embed_content(
+            model=settings.embedding_model,
+            contents=text,
+        )
+    except Exception as exc:
+        raise RuntimeError(f"embed_text failed for input of length {len(text)}") from exc
+    if not result.embeddings:
+        raise ValueError(f"Gemini returned no embeddings for input: {text!r:.50}")
     return result.embeddings[0].values
