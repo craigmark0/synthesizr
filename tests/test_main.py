@@ -115,3 +115,68 @@ def test_ingest_json_body_embed_failure_returns_502(test_client, mock_client):
         "source": "test.txt",
     })
     assert response.status_code == 502
+
+
+# ---------------------------------------------------------------------------
+# /query
+# ---------------------------------------------------------------------------
+
+def _make_row(content, source, doc_id, similarity):
+    from unittest.mock import MagicMock
+    row = MagicMock()
+    row.content = content
+    row.source = source
+    row.document_id = doc_id
+    row.similarity = similarity
+    return row
+
+
+def test_query_returns_answer_and_sources(test_client, mock_db, mock_client):
+    mock_db.execute.return_value.fetchall.return_value = [
+        _make_row("42 is the answer.", "doc.txt", "abc-123", 0.9),
+    ]
+    mock_client.models.generate_content.return_value.text = "The answer is 42."
+
+    response = test_client.post("/query", json={"question": "What is the answer?"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["answer"] == "The answer is 42."
+    assert data["sources"] == ["doc.txt"]
+
+
+def test_query_empty_db_returns_no_context_answer(test_client, mock_db):
+    mock_db.execute.return_value.fetchall.return_value = []
+
+    response = test_client.post("/query", json={"question": "What is X?"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "No relevant context" in data["answer"]
+    assert data["sources"] == []
+
+
+def test_query_requires_question_field(test_client):
+    response = test_client.post("/query", json={})
+    assert response.status_code == 422
+
+
+def test_query_embed_failure_returns_502(test_client, mock_client):
+    mock_client.models.embed_content.side_effect = RuntimeError("API down")
+
+    response = test_client.post("/query", json={"question": "What is X?"})
+    assert response.status_code == 502
+
+
+def test_query_sources_are_deduplicated(test_client, mock_db, mock_client):
+    mock_db.execute.return_value.fetchall.return_value = [
+        _make_row("content a", "doc.txt", "abc", 0.9),
+        _make_row("content b", "doc.txt", "def", 0.85),
+        _make_row("content c", "other.txt", "ghi", 0.8),
+    ]
+    mock_client.models.generate_content.return_value.text = "Answer."
+
+    response = test_client.post("/query", json={"question": "Q?"})
+
+    assert response.status_code == 200
+    assert response.json()["sources"] == ["doc.txt", "other.txt"]
