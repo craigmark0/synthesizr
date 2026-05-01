@@ -92,3 +92,52 @@ def test_embed_text_raises_when_gemini_returns_no_embeddings():
 
     with pytest.raises(ValueError, match="no embeddings"):
         embed_text("hello", client=mock_client)
+
+
+import uuid
+from src.ingest import store_document
+from src.db import ChunkType
+
+
+def test_store_document_returns_document_id_and_chunk_count():
+    mock_session = MagicMock()
+    mock_client = MagicMock()
+    mock_embedding = MagicMock()
+    mock_embedding.values = [0.1] * 3072
+    mock_client.models.embed_content.return_value.embeddings = [mock_embedding]
+
+    # "a" * 1000 + "b" * 500 = 1500 chars → 2 chunks at size=1000, overlap=200
+    doc_id, chunk_count = store_document(
+        text="a" * 1000 + "b" * 500,
+        source="test.txt",
+        user_metadata={"author": "alice"},
+        session=mock_session,
+        client=mock_client,
+    )
+
+    assert isinstance(uuid.UUID(doc_id), uuid.UUID)
+    assert chunk_count == 2
+    assert mock_session.add.call_count == 2
+    mock_session.commit.assert_called_once()
+
+
+def test_store_document_sets_correct_metadata_on_chunk():
+    mock_session = MagicMock()
+    mock_client = MagicMock()
+    mock_embedding = MagicMock()
+    mock_embedding.values = [0.1] * 3072
+    mock_client.models.embed_content.return_value.embeddings = [mock_embedding]
+
+    store_document(
+        text="short text",
+        source="my-doc.txt",
+        user_metadata={"published_at": "2024-01-01"},
+        session=mock_session,
+        client=mock_client,
+    )
+
+    stored_chunk = mock_session.add.call_args[0][0]
+    assert stored_chunk.user_metadata == {"published_at": "2024-01-01"}
+    assert stored_chunk.source == "my-doc.txt"
+    assert stored_chunk.chunk_type == ChunkType.text
+    assert stored_chunk.chunk_index == 0

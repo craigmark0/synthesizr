@@ -1,6 +1,11 @@
+import uuid
+from typing import Optional
+
 from google import genai
+from sqlalchemy.orm import Session
 
 from src.config import settings
+from src.db import Chunk, ChunkType, TextChunk
 
 
 def chunk_text(
@@ -38,3 +43,32 @@ def embed_text(text: str, client: genai.Client) -> list[float]:
     if not result.embeddings:
         raise ValueError(f"Gemini returned no embeddings for input: {text!r:.50}")
     return result.embeddings[0].values
+
+
+def store_document(
+    text: str,
+    source: str,
+    user_metadata: Optional[dict],
+    session: Session,
+    client: genai.Client,
+) -> tuple[str, int]:
+    chunks = chunk_text(text)
+    document_id = uuid.uuid4()
+
+    for index, chunk_content in enumerate(chunks):
+        embedding = embed_text(chunk_content, client=client)
+        chunk_id = uuid.uuid4()
+        chunk = Chunk(
+            id=chunk_id,
+            chunk_type=ChunkType.text,
+            document_id=document_id,
+            chunk_index=index,
+            source=source,
+            embedding=embedding,
+            user_metadata=user_metadata or {},
+        )
+        chunk.text_chunk = TextChunk(id=chunk_id, content=chunk_content)
+        session.add(chunk)
+
+    session.commit()
+    return str(document_id), len(chunks)
