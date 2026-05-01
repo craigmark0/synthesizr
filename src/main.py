@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from src.config import settings
 from src.db import get_db
 from src.ingest import store_document
+from src.query import search_chunks, synthesize
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,17 @@ class IngestRequest(BaseModel):
 class IngestResponse(BaseModel):
     document_id: str
     chunks_stored: int
+
+
+class QueryRequest(BaseModel):
+    question: str
+    threshold: Optional[float] = None
+    fallback_top_k: Optional[int] = None
+
+
+class QueryResponse(BaseModel):
+    answer: str
+    sources: list[str]
 
 
 @app.post("/ingest", response_model=IngestResponse)
@@ -96,6 +108,28 @@ def ingest_upload(
     except RuntimeError:
         raise HTTPException(status_code=502, detail="Embedding service error")
     return IngestResponse(document_id=document_id, chunks_stored=chunks_stored)
+
+
+@app.post("/query", response_model=QueryResponse)
+def query(
+    request: QueryRequest,
+    db: Session = Depends(get_db),
+    client: genai.Client = Depends(get_gemini_client),
+):
+    try:
+        chunks = search_chunks(
+            question=request.question,
+            session=db,
+            client=client,
+            threshold=request.threshold,
+            fallback_top_k=request.fallback_top_k,
+        )
+    except RuntimeError:
+        raise HTTPException(status_code=502, detail="Embedding service error")
+
+    answer = synthesize(question=request.question, chunks=chunks, client=client)
+    sources = list(dict.fromkeys(c["source"] for c in chunks))
+    return QueryResponse(answer=answer, sources=sources)
 
 
 @app.get("/health")
