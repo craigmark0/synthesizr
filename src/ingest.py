@@ -53,6 +53,8 @@ def store_document(
     client: genai.Client,
 ) -> tuple[str, int]:
     chunks = chunk_text(text)
+    if not chunks:
+        raise ValueError("text produced no chunks after processing")
     document_id = uuid.uuid4()
 
     for index, chunk_content in enumerate(chunks):
@@ -70,5 +72,5 @@ def store_document(
         chunk.text_chunk = TextChunk(id=chunk_id, content=chunk_content)
         session.add(chunk)
 
-    session.commit()
+    session.flush()
     return str(document_id), len(chunks)

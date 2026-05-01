@@ -1,9 +1,16 @@
+import uuid
+
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 from src.config import settings
-from src.ingest import chunk_text, embed_text
+from src.db import ChunkType, TextChunk
+from src.ingest import chunk_text, embed_text, store_document
 
+
+# ---------------------------------------------------------------------------
+# chunk_text
+# ---------------------------------------------------------------------------
 
 def test_chunk_text_short_input_returns_single_chunk():
     result = chunk_text("hello world", chunk_size=1000, overlap=200)
@@ -60,6 +67,10 @@ def test_chunk_text_three_chunks():
     assert len(result[2]) == 1000
 
 
+# ---------------------------------------------------------------------------
+# embed_text
+# ---------------------------------------------------------------------------
+
 def test_embed_text_returns_vector_of_correct_length():
     mock_client = MagicMock()
     mock_embedding = MagicMock()
@@ -94,17 +105,21 @@ def test_embed_text_raises_when_gemini_returns_no_embeddings():
         embed_text("hello", client=mock_client)
 
 
-import uuid
-from src.ingest import store_document
-from src.db import ChunkType
+# ---------------------------------------------------------------------------
+# store_document
+# ---------------------------------------------------------------------------
+
+def _make_mock_client(vector=None):
+    mock_client = MagicMock()
+    mock_embedding = MagicMock()
+    mock_embedding.values = vector or [0.1] * 3072
+    mock_client.models.embed_content.return_value.embeddings = [mock_embedding]
+    return mock_client
 
 
 def test_store_document_returns_document_id_and_chunk_count():
     mock_session = MagicMock()
-    mock_client = MagicMock()
-    mock_embedding = MagicMock()
-    mock_embedding.values = [0.1] * 3072
-    mock_client.models.embed_content.return_value.embeddings = [mock_embedding]
+    mock_client = _make_mock_client()
 
     # "a" * 1000 + "b" * 500 = 1500 chars → 2 chunks at size=1000, overlap=200
     doc_id, chunk_count = store_document(
@@ -118,15 +133,12 @@ def test_store_document_returns_document_id_and_chunk_count():
     assert isinstance(uuid.UUID(doc_id), uuid.UUID)
     assert chunk_count == 2
     assert mock_session.add.call_count == 2
-    mock_session.commit.assert_called_once()
+    mock_session.flush.assert_called_once()
 
 
 def test_store_document_sets_correct_metadata_on_chunk():
     mock_session = MagicMock()
-    mock_client = MagicMock()
-    mock_embedding = MagicMock()
-    mock_embedding.values = [0.1] * 3072
-    mock_client.models.embed_content.return_value.embeddings = [mock_embedding]
+    mock_client = _make_mock_client()
 
     store_document(
         text="short text",
@@ -141,3 +153,102 @@ def test_store_document_sets_correct_metadata_on_chunk():
     assert stored_chunk.source == "my-doc.txt"
     assert stored_chunk.chunk_type == ChunkType.text
     assert stored_chunk.chunk_index == 0
+
+
+def test_store_document_chunk_indices_are_sequential():
+    mock_session = MagicMock()
+    mock_client = _make_mock_client()
+
+    store_document(
+        text="a" * 1000 + "b" * 500,
+        source="test.txt",
+        user_metadata={},
+        session=mock_session,
+        client=mock_client,
+    )
+
+    calls = mock_session.add.call_args_list
+    assert calls[0][0][0].chunk_index == 0
+    assert calls[1][0][0].chunk_index == 1
+
+
+def test_store_document_all_chunks_share_same_document_id():
+    mock_session = MagicMock()
+    mock_client = _make_mock_client()
+
+    store_document(
+        text="a" * 1000 + "b" * 500,
+        source="test.txt",
+        user_metadata={},
+        session=mock_session,
+        client=mock_client,
+    )
+
+    calls = mock_session.add.call_args_list
+    doc_ids = [c[0][0].document_id for c in calls]
+    assert doc_ids[0] == doc_ids[1]
+
+
+def test_store_document_text_chunk_linked_with_correct_content():
+    mock_session = MagicMock()
+    mock_client = _make_mock_client()
+
+    store_document(
+        text="hello world",
+        source="test.txt",
+        user_metadata={},
+        session=mock_session,
+        client=mock_client,
+    )
+
+    stored_chunk = mock_session.add.call_args[0][0]
+    assert isinstance(stored_chunk.text_chunk, TextChunk)
+    assert stored_chunk.text_chunk.content == "hello world"
+    assert stored_chunk.text_chunk.id == stored_chunk.id
+
+
+def test_store_document_none_metadata_stored_as_empty_dict():
+    mock_session = MagicMock()
+    mock_client = _make_mock_client()
+
+    store_document(
+        text="some text",
+        source="test.txt",
+        user_metadata=None,
+        session=mock_session,
+        client=mock_client,
+    )
+
+    stored_chunk = mock_session.add.call_args[0][0]
+    assert stored_chunk.user_metadata == {}
+
+
+def test_store_document_raises_on_empty_text():
+    mock_session = MagicMock()
+    mock_client = _make_mock_client()
+
+    with pytest.raises(ValueError, match="no chunks"):
+        store_document(
+            text="",
+            source="test.txt",
+            user_metadata={},
+            session=mock_session,
+            client=mock_client,
+        )
+
+
+def test_store_document_does_not_flush_on_embed_failure():
+    mock_session = MagicMock()
+    mock_client = MagicMock()
+    mock_client.models.embed_content.side_effect = RuntimeError("API down")
+
+    with pytest.raises(RuntimeError):
+        store_document(
+            text="some text",
+            source="test.txt",
+            user_metadata={},
+            session=mock_session,
+            client=mock_client,
+        )
+
+    mock_session.flush.assert_not_called()
