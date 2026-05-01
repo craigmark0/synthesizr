@@ -55,3 +55,34 @@ def test_chunk_text_three_chunks():
     assert len(result[0]) == 1000
     assert len(result[1]) == 1000
     assert len(result[2]) == 1000
+
+
+from unittest.mock import MagicMock
+from src.config import settings
+from src.ingest import embed_text
+
+
+def test_embed_text_returns_vector_of_correct_length():
+    mock_client = MagicMock()
+    mock_embedding = MagicMock()
+    mock_embedding.values = [0.1] * 3072
+    mock_client.models.embed_content.return_value.embeddings = [mock_embedding]
+
+    result = embed_text("hello world", client=mock_client)
+
+    assert len(result) == 3072
+    assert result[0] == 0.1
+
+
+def test_embed_text_calls_gemini_with_correct_model():
+    mock_client = MagicMock()
+    mock_embedding = MagicMock()
+    mock_embedding.values = [0.0] * 3072
+    mock_client.models.embed_content.return_value.embeddings = [mock_embedding]
+
+    embed_text("some text", client=mock_client)
+
+    mock_client.models.embed_content.assert_called_once_with(
+        model=settings.embedding_model,
+        contents="some text",
+    )

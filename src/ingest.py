@@ -1,3 +1,5 @@
+from google import genai
+
 from src.config import settings
 
 
@@ -23,3 +25,11 @@ def chunk_text(
             break
         start += size - ovlp
     return chunks
+
+
+def embed_text(text: str, client: genai.Client) -> list[float]:
+    result = client.models.embed_content(
+        model=settings.embedding_model,
+        contents=text,
+    )
+    return result.embeddings[0].values
