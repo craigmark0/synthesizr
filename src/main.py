@@ -35,6 +35,12 @@ class IngestResponse(BaseModel):
     chunks_stored: int
 
 
+class SourceChunk(BaseModel):
+    content: str
+    source: str
+    document_id: str
+
+
 class QueryRequest(BaseModel):
     question: str
     threshold: Optional[float] = None
@@ -43,7 +49,7 @@ class QueryRequest(BaseModel):
 
 class QueryResponse(BaseModel):
     answer: str
-    sources: list[str]
+    sources: list[SourceChunk]
 
 
 @app.post("/ingest", response_model=IngestResponse)
@@ -124,11 +130,20 @@ def query(
             threshold=request.threshold,
             fallback_top_k=request.fallback_top_k,
         )
+        answer = synthesize(question=request.question, chunks=chunks, client=client)
     except RuntimeError:
         raise HTTPException(status_code=502, detail="Embedding service error")
 
-    answer = synthesize(question=request.question, chunks=chunks, client=client)
-    sources = list(dict.fromkeys(c["source"] for c in chunks))
+    seen = set()
+    sources = []
+    for c in chunks:
+        if c["document_id"] not in seen:
+            seen.add(c["document_id"])
+            sources.append(SourceChunk(
+                content=c["content"],
+                source=c["source"],
+                document_id=c["document_id"],
+            ))
     return QueryResponse(answer=answer, sources=sources)
 
 

@@ -142,7 +142,7 @@ def test_query_returns_answer_and_sources(test_client, mock_db, mock_client):
     assert response.status_code == 200
     data = response.json()
     assert data["answer"] == "The answer is 42."
-    assert data["sources"] == ["doc.txt"]
+    assert data["sources"] == [{"content": "42 is the answer.", "source": "doc.txt", "document_id": "abc-123"}]
 
 
 def test_query_empty_db_returns_no_context_answer(test_client, mock_db):
@@ -168,15 +168,28 @@ def test_query_embed_failure_returns_502(test_client, mock_client):
     assert response.status_code == 502
 
 
+def test_query_synthesize_failure_returns_502(test_client, mock_db, mock_client):
+    mock_db.execute.return_value.fetchall.return_value = [
+        _make_row("content", "doc.txt", "abc-123", 0.9),
+    ]
+    mock_client.models.generate_content.side_effect = RuntimeError("LLM down")
+
+    response = test_client.post("/query", json={"question": "What?"})
+    assert response.status_code == 502
+
+
 def test_query_sources_are_deduplicated(test_client, mock_db, mock_client):
     mock_db.execute.return_value.fetchall.return_value = [
-        _make_row("content a", "doc.txt", "abc", 0.9),
-        _make_row("content b", "doc.txt", "def", 0.85),
-        _make_row("content c", "other.txt", "ghi", 0.8),
+        _make_row("content a", "doc.txt", "doc-id-1", 0.9),
+        _make_row("content b", "doc.txt", "doc-id-1", 0.85),   # same document_id → deduplicated
+        _make_row("content c", "other.txt", "doc-id-2", 0.8),
     ]
     mock_client.models.generate_content.return_value.text = "Answer."
 
     response = test_client.post("/query", json={"question": "Q?"})
 
     assert response.status_code == 200
-    assert response.json()["sources"] == ["doc.txt", "other.txt"]
+    assert response.json()["sources"] == [
+        {"content": "content a", "source": "doc.txt", "document_id": "doc-id-1"},
+        {"content": "content c", "source": "other.txt", "document_id": "doc-id-2"},
+    ]
