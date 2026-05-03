@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Synthesizr")
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+SNIPPET_CHARS = 200
 
 
 def get_gemini_client() -> genai.Client:
@@ -36,9 +37,9 @@ class IngestResponse(BaseModel):
 
 
 class SourceChunk(BaseModel):
-    content: str
     source: str
     document_id: str
+    content: Optional[str] = None
 
 
 class QueryRequest(BaseModel):
@@ -116,9 +117,10 @@ def ingest_upload(
     return IngestResponse(document_id=document_id, chunks_stored=chunks_stored)
 
 
-@app.post("/query", response_model=QueryResponse)
+@app.post("/query", response_model=QueryResponse, response_model_exclude_none=True)
 def query(
     request: QueryRequest,
+    include_content_snippets: bool = False,
     db: Session = Depends(get_db),
     client: genai.Client = Depends(get_gemini_client),
 ):
@@ -140,7 +142,7 @@ def query(
         if c["document_id"] not in seen:
             seen.add(c["document_id"])
             sources.append(SourceChunk(
-                content=c["content"],
+                content=c["content"][:SNIPPET_CHARS] if include_content_snippets else None,
                 source=c["source"],
                 document_id=c["document_id"],
             ))

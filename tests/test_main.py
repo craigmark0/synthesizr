@@ -142,7 +142,7 @@ def test_query_returns_answer_and_sources(test_client, mock_db, mock_client):
     assert response.status_code == 200
     data = response.json()
     assert data["answer"] == "The answer is 42."
-    assert data["sources"] == [{"content": "42 is the answer.", "source": "doc.txt", "document_id": "abc-123"}]
+    assert data["sources"] == [{"source": "doc.txt", "document_id": "abc-123"}]
 
 
 def test_query_empty_db_returns_no_context_answer(test_client, mock_db):
@@ -190,6 +190,67 @@ def test_query_sources_are_deduplicated(test_client, mock_db, mock_client):
 
     assert response.status_code == 200
     assert response.json()["sources"] == [
-        {"content": "content a", "source": "doc.txt", "document_id": "doc-id-1"},
-        {"content": "content c", "source": "other.txt", "document_id": "doc-id-2"},
+        {"source": "doc.txt", "document_id": "doc-id-1"},
+        {"source": "other.txt", "document_id": "doc-id-2"},
     ]
+
+
+def test_query_without_snippet_param_omits_content(test_client, mock_db, mock_client):
+    mock_db.execute.return_value.fetchall.return_value = [
+        _make_row("42 is the answer.", "doc.txt", "abc-123", 0.9),
+    ]
+    mock_client.models.generate_content.return_value.text = "Answer."
+
+    response = test_client.post("/query", json={"question": "What is the answer?"})
+
+    assert response.status_code == 200
+    assert "content" not in response.json()["sources"][0]
+
+
+def test_query_with_snippet_param_returns_content(test_client, mock_db, mock_client):
+    mock_db.execute.return_value.fetchall.return_value = [
+        _make_row("42 is the answer.", "doc.txt", "abc-123", 0.9),
+    ]
+    mock_client.models.generate_content.return_value.text = "Answer."
+
+    response = test_client.post(
+        "/query?include_content_snippets=true",
+        json={"question": "What is the answer?"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "content" in data["sources"][0]
+    assert data["sources"][0]["content"] == "42 is the answer."
+
+
+def test_query_snippet_truncates_to_200_chars(test_client, mock_db, mock_client):
+    long_content = "x" * 300
+    mock_db.execute.return_value.fetchall.return_value = [
+        _make_row(long_content, "doc.txt", "abc-123", 0.9),
+    ]
+    mock_client.models.generate_content.return_value.text = "Answer."
+
+    response = test_client.post(
+        "/query?include_content_snippets=true",
+        json={"question": "What?"},
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()["sources"][0]["content"]) == 200
+
+
+def test_query_snippet_does_not_truncate_short_content(test_client, mock_db, mock_client):
+    short_content = "Short answer."
+    mock_db.execute.return_value.fetchall.return_value = [
+        _make_row(short_content, "doc.txt", "abc-123", 0.9),
+    ]
+    mock_client.models.generate_content.return_value.text = "Answer."
+
+    response = test_client.post(
+        "/query?include_content_snippets=true",
+        json={"question": "What?"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["sources"][0]["content"] == short_content
